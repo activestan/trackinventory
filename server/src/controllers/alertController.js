@@ -1,4 +1,5 @@
 const Alert = require('../models/Alert');
+const { runAlertCheckNow } = require('../jobs/alertScheduler');
 
 // GET /api/alerts - list all alerts (most recent first)
 async function listAlerts(req, res) {
@@ -34,4 +35,33 @@ async function alertSummary(req, res) {
   }
 }
 
-module.exports = { listAlerts, alertSummary };
+/**
+ * POST /api/alerts/run-check
+ * Immediately runs one full alert-checking cycle (low-stock and asset
+ * review checks), the same logic normally triggered by the scheduled
+ * cron job. Intended to be called by an external uptime/cron pinger
+ * (e.g. cron-job.org) so that alert checks are not missed if the
+ * in-process node-cron timer happens to fire while the server is asleep
+ * on free-tier hosting. Protected by a shared secret rather than a user
+ * JWT, since external pingers cannot log in as a user.
+ */
+async function triggerAlertCheck(req, res) {
+  const providedKey = req.headers['x-alert-key'] || req.query.key;
+  const expectedKey = process.env.ALERT_TRIGGER_KEY;
+
+  if (!expectedKey) {
+    return res.status(503).json({ message: 'Alert trigger endpoint is not configured (ALERT_TRIGGER_KEY missing).' });
+  }
+  if (providedKey !== expectedKey) {
+    return res.status(401).json({ message: 'Invalid or missing alert trigger key.' });
+  }
+
+  try {
+    await runAlertCheckNow();
+    res.json({ message: 'Alert check completed.', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ message: 'Error running alert check.', error: error.message });
+  }
+}
+
+module.exports = { listAlerts, alertSummary, triggerAlertCheck };
