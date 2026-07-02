@@ -13,6 +13,7 @@ const AlertSchema = new mongoose.Schema(
     status: { type: String, enum: ['Pending', 'Sent', 'Failed'], default: 'Pending' },
     date_generated: { type: Date, default: Date.now },
     date_sent: { type: Date, default: null },
+    send_attempts: { type: Number, default: 0 },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
