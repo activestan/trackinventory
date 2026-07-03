@@ -58,3 +58,14 @@ export const getAlertSummary = () => axiosClient.get('/alerts/summary').then((re
 // ---- Reports / Dashboard ----
 export const getDashboardSummary = () => axiosClient.get('/reports/dashboard').then((res) => res.data);
 export const getStockByCategory = () => axiosClient.get('/reports/stock-by-category').then((res) => res.data);
+
+// ---- Sales Uploads ----
+export const uploadSalesFile = (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return axiosClient
+    .post('/sales-uploads', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+    .then((res) => res.data);
+};
+export const getSalesUploads = () => axiosClient.get('/sales-uploads').then((res) => res.data);
+export const getSalesUpload = (id) => axiosClient.get(`/sales-uploads/${id}`).then((res) => res.data);

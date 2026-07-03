@@ -7,6 +7,7 @@ import InventoryPage from './pages/InventoryPage';
 import AssetsPage from './pages/AssetsPage';
 import AlertsPage from './pages/AlertsPage';
 import UsersPage from './pages/UsersPage';
+import SalesUploadPage from './pages/SalesUploadPage';
 
 export default function App() {
   return (
@@ -51,6 +52,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={['Administrator']}>
                 <UsersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sales-upload"
+            element={
+              <ProtectedRoute allowedRoles={['Administrator', 'Manager']}>
+                <SalesUploadPage />
               </ProtectedRoute>
             }
           />

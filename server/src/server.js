@@ -13,6 +13,7 @@ const inventoryRoutes = require('./routes/inventoryRoutes');
 const assetRoutes = require('./routes/assetRoutes');
 const alertRoutes = require('./routes/alertRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const salesUploadRoutes = require('./routes/salesUploadRoutes');
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/sales-uploads', salesUploadRoutes);
 
 // ---- 404 handler ----
 app.use((req, res) => {
@@ -43,6 +45,12 @@ app.use((req, res) => {
 // ---- Global error handler ----
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
+  // Multer surfaces file upload issues (size limit exceeded, wrong file
+  // type from the fileFilter check) as errors passed to next(), rather
+  // than throwing inside the route handler, so they are handled here.
+  if (err && (err.name === 'MulterError' || /\.csv files are accepted/.test(err.message || ''))) {
+    return res.status(400).json({ message: err.message });
+  }
   console.error(err.stack);
   res.status(500).json({ message: 'An unexpected server error occurred.' });
 });
