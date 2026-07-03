@@ -58,7 +58,7 @@ export default function App() {
           <Route
             path="/sales-upload"
             element={
-              <ProtectedRoute allowedRoles={['Administrator', 'Manager']}>
+              <ProtectedRoute allowedRoles={['Administrator', 'Manager', 'Store Officer']}>
                 <SalesUploadPage />
               </ProtectedRoute>
             }

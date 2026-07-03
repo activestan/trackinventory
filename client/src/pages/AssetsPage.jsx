@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '../components/AppLayout';
 import Modal from '../components/Modal';
+import { useAuth } from '../context/AuthContext';
 import * as api from '../api/services';
 
 const STATUS_BADGE = {
@@ -11,6 +12,7 @@ const STATUS_BADGE = {
 };
 
 export default function AssetsPage() {
+  const { user } = useAuth();
   const [assets, setAssets] = useState([]);
   const [categories, setCategories] = useState([]);
   const [users, setUsers] = useState([]);
@@ -18,6 +20,10 @@ export default function AssetsPage() {
   const [error, setError] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [transferAssetTarget, setTransferAssetTarget] = useState(null);
+  const [editAssetTarget, setEditAssetTarget] = useState(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(null);
+
+  const isAdministrator = user?.role === 'Administrator';
 
   async function loadData() {
     setLoading(true);
@@ -44,6 +50,18 @@ export default function AssetsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  async function handleDeleteConfirmed(asset) {
+    setError('');
+    try {
+      await api.deleteAsset(asset._id);
+      setConfirmingDelete(null);
+      loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error deleting asset.');
+      setConfirmingDelete(null);
+    }
+  }
 
   return (
     <AppLayout title="Asset Register">
@@ -84,9 +102,23 @@ export default function AssetsPage() {
                     </span>
                   </td>
                   <td>
-                    <button className="btn-link" onClick={() => setTransferAssetTarget(asset)}>
-                      Assign / Update
-                    </button>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      <button className="btn-link" onClick={() => setTransferAssetTarget(asset)}>
+                        Assign / Update
+                      </button>
+                      <button className="btn-link" onClick={() => setEditAssetTarget(asset)}>
+                        Edit
+                      </button>
+                      {isAdministrator && (
+                        <button
+                          className="btn-link"
+                          style={{ color: '#dc2626' }}
+                          onClick={() => setConfirmingDelete(asset)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -116,6 +148,35 @@ export default function AssetsPage() {
           onClose={() => setTransferAssetTarget(null)}
           onSaved={() => { setTransferAssetTarget(null); loadData(); }}
         />
+      )}
+
+      {editAssetTarget && (
+        <EditAssetModal
+          asset={editAssetTarget}
+          categories={categories}
+          onClose={() => setEditAssetTarget(null)}
+          onSaved={() => { setEditAssetTarget(null); loadData(); }}
+        />
+      )}
+
+      {confirmingDelete && (
+        <Modal title="Confirm Asset Deletion" onClose={() => setConfirmingDelete(null)}>
+          <p>
+            Are you sure you want to permanently delete <strong>{confirmingDelete.asset_name}</strong>{' '}
+            (Tag {confirmingDelete.asset_tag_no})? This cannot be undone. Its past movement/assignment
+            history will remain on record for audit purposes.
+          </p>
+          <div className="form-actions">
+            <button className="btn-secondary" onClick={() => setConfirmingDelete(null)}>Cancel</button>
+            <button
+              className="btn-primary"
+              style={{ background: '#dc2626' }}
+              onClick={() => handleDeleteConfirmed(confirmingDelete)}
+            >
+              Yes, Delete Asset
+            </button>
+          </div>
+        </Modal>
       )}
     </AppLayout>
   );
@@ -197,6 +258,76 @@ function AddAssetModal({ categories, users, onClose, onCreated }) {
         <div className="form-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Save Asset'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function EditAssetModal({ asset, categories, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    asset_name: asset.asset_name,
+    category_id: asset.category_id?._id || '',
+    serial_number: asset.serial_number || '',
+    location: asset.location || '',
+    warranty_expiry: asset.warranty_expiry ? asset.warranty_expiry.slice(0, 10) : '',
+    purchase_value: asset.purchase_value || 0,
+  });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  function updateField(field, value) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await api.updateAsset(asset._id, form);
+      onSaved();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error updating asset.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={`Edit Asset - ${asset.asset_name}`} onClose={onClose}>
+      {error && <div className="alert-banner alert-banner--error">{error}</div>}
+      <form onSubmit={handleSubmit} className="form-grid">
+        <label>
+          Asset Name
+          <input required value={form.asset_name} onChange={(e) => updateField('asset_name', e.target.value)} />
+        </label>
+        <label>
+          Category
+          <select required value={form.category_id} onChange={(e) => updateField('category_id', e.target.value)}>
+            <option value="">Select category</option>
+            {categories.map((c) => <option key={c._id} value={c._id}>{c.category_name}</option>)}
+          </select>
+        </label>
+        <label>
+          Serial Number
+          <input value={form.serial_number} onChange={(e) => updateField('serial_number', e.target.value)} />
+        </label>
+        <label>
+          Location
+          <input value={form.location} onChange={(e) => updateField('location', e.target.value)} />
+        </label>
+        <label>
+          Warranty Expiry
+          <input type="date" value={form.warranty_expiry} onChange={(e) => updateField('warranty_expiry', e.target.value)} />
+        </label>
+        <label>
+          Purchase Value
+          <input type="number" min="0" value={form.purchase_value} onChange={(e) => updateField('purchase_value', Number(e.target.value))} />
+        </label>
+        <div className="form-actions">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
         </div>
       </form>
     </Modal>

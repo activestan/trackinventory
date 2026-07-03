@@ -15,7 +15,8 @@ export const changePassword = (current_password, new_password) =>
 export const getUsers = () => axiosClient.get('/users').then((res) => res.data);
 export const createUser = (data) => axiosClient.post('/users', data).then((res) => res.data);
 export const updateUser = (id, data) => axiosClient.put(`/users/${id}`, data).then((res) => res.data);
-export const deactivateUser = (id) => axiosClient.delete(`/users/${id}`).then((res) => res.data);
+export const deactivateUser = (id) => axiosClient.put(`/users/${id}/deactivate`).then((res) => res.data);
+export const deleteUser = (id) => axiosClient.delete(`/users/${id}`).then((res) => res.data);
 
 // ---- Categories ----
 export const getCategories = () => axiosClient.get('/categories').then((res) => res.data);

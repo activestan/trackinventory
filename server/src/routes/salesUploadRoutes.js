@@ -20,7 +20,7 @@ const upload = multer({
   },
 });
 
-router.use(authenticate, authorize('Administrator', 'Manager'));
+router.use(authenticate, authorize('Administrator', 'Manager', 'Store Officer'));
 
 router.post('/', upload.single('file'), uploadSalesFile);
 router.get('/', listSalesUploads);
