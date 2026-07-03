@@ -5,16 +5,29 @@ const Alert = require('../models/Alert');
 const User = require('../models/User');
 const sendMail = require('../utils/mailer');
 
-// An alert is only considered "resolved" (and eligible for a new alert to
-// be raised) once it has been successfully Sent. A Failed or still-Pending
-// alert for the same condition is retried instead of duplicated.
-const UNRESOLVED_STATUSES = ['Pending', 'Failed'];
-
-// A Failed alert is retried at most this many times before being left
-// alone (to avoid retrying forever against a permanently broken mail
-// configuration). Each unresolved alert counts every scheduler run as one
-// attempt via the send_attempts counter.
+// A Failed alert is retried immediately on every check while its attempt
+// count remains below this limit, to recover quickly from a transient
+// delivery problem (e.g. a brief outage of the email provider).
 const MAX_SEND_ATTEMPTS = 5;
+
+// Once an alert for a given condition has been successfully Sent, no new
+// alert is raised for the same condition until this many hours have
+// passed, even if the underlying condition (e.g. low stock) persists.
+// Without this, a condition that remains unresolved between scheduler
+// runs would otherwise generate and send a brand new alert on every
+// single run - including runs triggered every few minutes by an
+// external uptime/cron pinger - flooding recipients with duplicate
+// emails for a problem they have already been told about. After the
+// cooldown elapses, a fresh alert is sent as a reminder that the
+// condition is still unresolved.
+const ALERT_COOLDOWN_HOURS = Number(process.env.ALERT_COOLDOWN_HOURS) || 12;
+
+// If a Failed alert has exhausted MAX_SEND_ATTEMPTS, it is left alone
+// (not retried on every run) until this many hours have passed since its
+// last attempt, at which point it is given a fresh set of attempts. This
+// allows the system to self-heal after a prolonged outage of the email
+// provider without retrying uselessly every few minutes in the meantime.
+const FAILED_RETRY_COOLDOWN_HOURS = Number(process.env.ALERT_FAILED_RETRY_COOLDOWN_HOURS) || 6;
 
 // Roles that receive every alert type regardless of its specific subject
 // matter, reflecting their oversight responsibility over the whole
@@ -30,6 +43,11 @@ const ROLE_SPECIFIC_RECIPIENTS = {
   'Asset-Review': ['Asset Custodian'],
   'Asset-Overdue': ['Asset Custodian'],
 };
+
+function hoursSince(date) {
+  if (!date) return Infinity;
+  return (Date.now() - new Date(date).getTime()) / (1000 * 60 * 60);
+}
 
 /**
  * Returns the list of email addresses that should receive a notification
@@ -59,9 +77,7 @@ async function getAlertRecipients(alertType) {
 
 /**
  * Checks every inventory item for a low-stock condition (quantity_on_hand
- * <= reorder_level). For each qualifying item without an already-resolved
- * (Sent) alert, an Alert document is created or reused and an email is
- * (re)attempted.
+ * <= reorder_level) and raises or retries an alert as appropriate.
  */
 async function checkLowStock() {
   const lowStockItems = await InventoryItem.find({
@@ -80,9 +96,8 @@ async function checkLowStock() {
 
 /**
  * Checks every asset for a review-due condition (warranty expired or
- * review_due_date has passed). For each qualifying asset without an
- * already-resolved (Sent) alert, an Alert document is created or reused
- * and an email is (re)attempted.
+ * review_due_date has passed) and raises or retries an alert as
+ * appropriate.
  */
 async function checkAssetReviews() {
   const now = new Date();
@@ -105,38 +120,58 @@ async function checkAssetReviews() {
 }
 
 /**
- * Finds an existing unresolved (Pending or Failed) alert for the given
- * condition and retries it, or creates a brand new alert if none exists.
- * This prevents both (a) duplicate alerts being created every scheduler
- * run for the same unresolved condition, and (b) a Failed/stuck-Pending
- * alert being silently abandoned forever.
+ * Decides whether a notification should be (re)sent for a given
+ * condition, based on the most recent Alert record for that exact
+ * condition (if any):
+ *
+ *  - No prior alert at all: this is a brand new condition -> send.
+ *  - Most recent alert is Pending or Failed with attempts remaining:
+ *    retry the same alert immediately (transient delivery issue).
+ *  - Most recent alert is Failed with attempts exhausted: only retry
+ *    (with a fresh attempt count) once FAILED_RETRY_COOLDOWN_HOURS has
+ *    passed since the last attempt, to avoid hammering a broken email
+ *    configuration.
+ *  - Most recent alert is Sent: the condition was already reported;
+ *    only raise a new reminder alert once ALERT_COOLDOWN_HOURS has
+ *    passed since it was sent, rather than on every scheduler run.
  */
 async function raiseOrRetryAlert({ alert_type, related_item_id, related_asset_id, message, subject }) {
-  const filter = {
-    alert_type,
-    status: { $in: UNRESOLVED_STATUSES },
-  };
+  const filter = { alert_type };
   if (related_item_id) filter.related_item_id = related_item_id;
   if (related_asset_id) filter.related_asset_id = related_asset_id;
 
-  let alert = await Alert.findOne(filter);
+  const mostRecent = await Alert.findOne(filter).sort({ date_generated: -1 });
 
-  if (alert) {
-    if ((alert.send_attempts || 0) >= MAX_SEND_ATTEMPTS) {
-      return; // give up retrying this specific alert until it's manually reviewed
-    }
-  } else {
-    alert = await Alert.create({
-      alert_type,
-      related_item_id,
-      related_asset_id,
-      message,
-      status: 'Pending',
-      date_generated: new Date(),
+  if (!mostRecent) {
+    const alert = await Alert.create({
+      alert_type, related_item_id, related_asset_id, message,
+      status: 'Pending', date_generated: new Date(),
     });
+    await dispatchAlertEmail(alert, message, subject);
+    return;
   }
 
-  await dispatchAlertEmail(alert, message, subject);
+  if (mostRecent.status === 'Sent') {
+    if (hoursSince(mostRecent.date_sent) < ALERT_COOLDOWN_HOURS) {
+      return; // already notified recently for this condition; do not resend yet
+    }
+    const alert = await Alert.create({
+      alert_type, related_item_id, related_asset_id, message,
+      status: 'Pending', date_generated: new Date(),
+    });
+    await dispatchAlertEmail(alert, message, subject);
+    return;
+  }
+
+  // Status is Pending or Failed at this point.
+  if ((mostRecent.send_attempts || 0) >= MAX_SEND_ATTEMPTS) {
+    if (hoursSince(mostRecent.updated_at) < FAILED_RETRY_COOLDOWN_HOURS) {
+      return; // give the failing configuration a rest before trying again
+    }
+    mostRecent.send_attempts = 0; // fresh set of attempts after the cooldown
+  }
+
+  await dispatchAlertEmail(mostRecent, message, subject);
 }
 
 /**
