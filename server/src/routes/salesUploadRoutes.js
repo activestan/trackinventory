@@ -9,12 +9,12 @@ const { uploadSalesFile, listSalesUploads, getSalesUpload } = require('../contro
 // environment's filesystem is ephemeral.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB is generous for a CSV of daily sales
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB is generous for a day's sales, even as an Excel workbook
   fileFilter: (req, file, cb) => {
-    const allowedExtensions = ['.csv'];
-    const isCsv = allowedExtensions.some((ext) => file.originalname.toLowerCase().endsWith(ext));
-    if (!isCsv) {
-      return cb(new Error('Only .csv files are accepted for sales uploads.'));
+    const allowedExtensions = ['.csv', '.xlsx', '.xls'];
+    const isAllowed = allowedExtensions.some((ext) => file.originalname.toLowerCase().endsWith(ext));
+    if (!isAllowed) {
+      return cb(new Error('Only .csv, .xlsx, and .xls files are accepted for sales uploads.'));
     }
     cb(null, true);
   },

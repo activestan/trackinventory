@@ -1,4 +1,5 @@
 const { parse } = require('csv-parse/sync');
+const XLSX = require('xlsx');
 const InventoryItem = require('../models/InventoryItem');
 const StockTransaction = require('../models/StockTransaction');
 const SalesUpload = require('../models/SalesUpload');
@@ -19,32 +20,56 @@ function findHeaderKey(row, aliases) {
 }
 
 /**
+ * Parses the uploaded file's buffer into an array of plain row objects
+ * (one per data row, keyed by column header), supporting both CSV and
+ * Excel (.xlsx/.xls) files so that managers and store officers can
+ * upload whichever format their sales records are already kept in,
+ * without needing to manually convert Excel to CSV first.
+ */
+function parseUploadedFile(file) {
+  const isExcel = /\.(xlsx|xls)$/i.test(file.originalname);
+
+  if (isExcel) {
+    const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      throw new Error('The Excel file does not contain any sheets.');
+    }
+    const worksheet = workbook.Sheets[firstSheetName];
+    // defval ensures cells left blank in a row still appear as empty
+    // strings rather than being omitted from the resulting row object,
+    // keeping row objects consistent for the validation logic below.
+    return XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+  }
+
+  return parse(file.buffer, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+  });
+}
+
+/**
  * POST /api/sales-uploads
- * Accepts a CSV file (multipart/form-data, field name "file") containing
- * a day's sales, with at minimum a SKU column and a quantity column.
- * Every valid row is recorded as a Stock-Out transaction against the
- * matching inventory item, exactly as if a Store Officer had manually
- * recorded that sale, automatically reducing quantity_on_hand and
- * feeding directly into the same low-stock alert logic. Restricted to
- * Manager and Administrator roles, as the target use case is a manager
- * reconciling a day's till/sales report rather than routine, item-by-
- * item stock-out entry.
+ * Accepts a CSV or Excel (.xlsx/.xls) file (multipart/form-data, field
+ * name "file") containing a day's sales, with at minimum a SKU column
+ * and a quantity column. Every valid row is recorded as a Stock-Out
+ * transaction against the matching inventory item, exactly as if a
+ * Store Officer had manually recorded that sale, automatically reducing
+ * quantity_on_hand and feeding directly into the same low-stock alert
+ * logic. Restricted to Administrator, Manager and Store Officer roles.
  */
 async function uploadSalesFile(req, res) {
   try {
     if (!req.file) {
-      return res.status(400).json({ message: 'No file was uploaded. Please attach a CSV file under the "file" field.' });
+      return res.status(400).json({ message: 'No file was uploaded. Please attach a CSV or Excel file under the "file" field.' });
     }
 
     let rows;
     try {
-      rows = parse(req.file.buffer, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-      });
+      rows = parseUploadedFile(req.file);
     } catch (parseError) {
-      return res.status(400).json({ message: 'The uploaded file could not be parsed as CSV.', error: parseError.message });
+      return res.status(400).json({ message: 'The uploaded file could not be parsed. Please ensure it is a valid CSV or Excel file.', error: parseError.message });
     }
 
     if (rows.length === 0) {

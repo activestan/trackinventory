@@ -48,7 +48,7 @@ app.use((err, req, res, next) => {
   // Multer surfaces file upload issues (size limit exceeded, wrong file
   // type from the fileFilter check) as errors passed to next(), rather
   // than throwing inside the route handler, so they are handled here.
-  if (err && (err.name === 'MulterError' || /\.csv files are accepted/.test(err.message || ''))) {
+  if (err && (err.name === 'MulterError' || /\.xls files are accepted/.test(err.message || ''))) {
     return res.status(400).json({ message: err.message });
   }
   console.error(err.stack);

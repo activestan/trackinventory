@@ -53,16 +53,17 @@ export default function SalesUploadPage() {
       <div className="panel" style={{ marginBottom: 20 }}>
         <h3>Upload a Day's Sales</h3>
         <p className="muted">
-          Upload a CSV file listing each item sold and the quantity sold. The file must include a
-          column identifying the item by <strong>SKU code</strong> (accepted headers: SKU, SKU Code,
-          Item SKU, Code) and a column for the <strong>quantity sold</strong> (accepted headers:
-          Quantity, Qty, Quantity Sold, Units Sold). Each valid row is automatically recorded as a
-          Stock-Out transaction, reducing the item's stock level exactly as a manual sale would, and
-          feeding directly into the low-stock alert system.
+          Upload a CSV or Excel (.xlsx / .xls) file listing each item sold and the quantity sold.
+          The file must include a column identifying the item by <strong>SKU code</strong>
+          (accepted headers: SKU, SKU Code, Item SKU, Code) and a column for the{' '}
+          <strong>quantity sold</strong> (accepted headers: Quantity, Qty, Quantity Sold, Units
+          Sold). Each valid row is automatically recorded as a Stock-Out transaction, reducing the
+          item's stock level exactly as a manual sale would, and feeding directly into the
+          low-stock alert system.
         </p>
         <div className="panel" style={{ background: '#f9fafb', marginBottom: 16 }}>
           <p style={{ margin: 0, fontSize: '0.85rem' }}>
-            <strong>Example CSV format:</strong>
+            <strong>Example format (CSV or the first sheet of an Excel workbook):</strong>
           </p>
           <pre style={{ margin: '8px 0 0', fontSize: '0.82rem', background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #e4e7ec' }}>
 sku,quantity{'\n'}NET-CAT6-001,2{'\n'}COM-MSE-004,3{'\n'}CON-TNR-003,1
@@ -73,11 +74,11 @@ sku,quantity{'\n'}NET-CAT6-001,2{'\n'}COM-MSE-004,3{'\n'}CON-TNR-003,1
 
         <form onSubmit={handleUpload} className="form-grid">
           <label>
-            Sales File (.csv)
+            Sales File (.csv, .xlsx, or .xls)
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               required
               onChange={(e) => setFile(e.target.files[0] || null)}
             />
