@@ -37,8 +37,8 @@ export default function ForgotPasswordPage() {
 
         {submitted ? (
           <div className="alert-banner alert-banner--success">
-            If an account exists for that email address, a password reset link has been sent to
-            it. Please check your inbox (and spam folder) — the link is valid for 30 minutes.
+            A password reset link has been sent to your email address. Please check your inbox
+            (and spam folder) — the link is valid for 30 minutes.
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="login-form">
