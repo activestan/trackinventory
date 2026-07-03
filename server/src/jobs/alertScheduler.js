@@ -16,19 +16,39 @@ const UNRESOLVED_STATUSES = ['Pending', 'Failed'];
 // attempt via the send_attempts counter.
 const MAX_SEND_ATTEMPTS = 5;
 
+// Roles that receive every alert type regardless of its specific subject
+// matter, reflecting their oversight responsibility over the whole
+// system's inventory and asset operations.
+const OVERSIGHT_ROLES = ['Administrator', 'Manager'];
+
+// Roles that additionally receive alerts specific to their day-to-day
+// operational responsibility, since they are best placed to act on that
+// particular condition immediately (e.g. a Store Officer reordering
+// stock, or an Asset Custodian arranging an asset's review/service).
+const ROLE_SPECIFIC_RECIPIENTS = {
+  'Low-Stock': ['Store Officer'],
+  'Asset-Review': ['Asset Custodian'],
+  'Asset-Overdue': ['Asset Custodian'],
+};
+
 /**
- * Returns the list of email addresses that should receive alert
- * notifications: every active Administrator and Manager. Falls back to
- * ALERT_RECIPIENT_EMAIL (if configured) so the system still works even
- * before any Administrator/Manager accounts exist.
+ * Returns the list of email addresses that should receive a notification
+ * for a given alert type: every active Administrator and Manager (who
+ * receive all alert types), plus every active user whose role is
+ * specifically relevant to that alert type (e.g. Store Officers for
+ * Low-Stock alerts, Asset Custodians for Asset-Review alerts). Falls
+ * back to ALERT_RECIPIENT_EMAIL if no matching users exist at all, so
+ * the system still notifies someone before any accounts are set up.
  */
-async function getAlertRecipients() {
+async function getAlertRecipients(alertType) {
+  const relevantRoles = [...OVERSIGHT_ROLES, ...(ROLE_SPECIFIC_RECIPIENTS[alertType] || [])];
+
   const recipients = await User.find({
-    role: { $in: ['Administrator', 'Manager'] },
+    role: { $in: relevantRoles },
     is_active: true,
   }).select('email');
 
-  const emails = recipients.map((u) => u.email).filter(Boolean);
+  const emails = [...new Set(recipients.map((u) => u.email).filter(Boolean))];
 
   if (emails.length === 0 && process.env.ALERT_RECIPIENT_EMAIL) {
     return [process.env.ALERT_RECIPIENT_EMAIL];
@@ -120,18 +140,19 @@ async function raiseOrRetryAlert({ alert_type, related_item_id, related_asset_id
 }
 
 /**
- * Sends the alert email to every configured recipient and updates the
- * Alert document's status accordingly (Sent or Failed), incrementing the
- * attempt counter on every try so repeated failures are bounded.
+ * Sends the alert email to every recipient relevant to this alert's
+ * type and updates the Alert document's status accordingly (Sent or
+ * Failed), incrementing the attempt counter on every try so repeated
+ * failures are bounded.
  */
 async function dispatchAlertEmail(alert, message, subject) {
   alert.send_attempts = (alert.send_attempts || 0) + 1;
 
   try {
-    const recipients = await getAlertRecipients();
+    const recipients = await getAlertRecipients(alert.alert_type);
 
     if (recipients.length === 0) {
-      throw new Error('No alert recipients configured (no Administrator/Manager accounts and no ALERT_RECIPIENT_EMAIL fallback).');
+      throw new Error(`No alert recipients configured for alert type "${alert.alert_type}" (no matching role accounts and no ALERT_RECIPIENT_EMAIL fallback).`);
     }
 
     await sendMail({
