@@ -104,17 +104,10 @@ async function changePassword(req, res) {
  * single-use token is generated, its SHA-256 hash is stored on the
  * user's record (the raw token itself is never persisted, mirroring how
  * passwords are never stored in plain text), and a reset link containing
- * the raw token is emailed to the address.
- *
- * NOTE: this system is used internally by a fixed set of staff accounts
- * (there is no public self-signup), so unlike a public consumer app the
- * endpoint explicitly tells the caller whether the email belongs to a
- * registered staff account, to save them time re-typing/guessing their
- * work email. This intentionally trades away "anti-enumeration" secrecy
- * (a public-facing app would normally always return the same generic
- * message) in favour of a clearer, faster staff experience, since the
- * accounts here are internal/organisational rather than self-registered
- * public identities.
+ * the raw token is emailed to the address. To avoid revealing which
+ * email addresses have an account (a common account-enumeration
+ * vulnerability), the endpoint always returns the same success message
+ * regardless of whether the address matches an existing, active user.
  */
 async function forgotPassword(req, res) {
   try {
@@ -123,9 +116,13 @@ async function forgotPassword(req, res) {
       return res.status(400).json({ message: 'Email is required.' });
     }
 
+    const genericResponse = {
+      message: 'If an account exists for that email address, a password reset link has been sent to it.',
+    };
+
     const user = await User.findOne({ email: email.toLowerCase(), is_active: true });
     if (!user) {
-      return res.status(404).json({ message: 'No staff account was found for that email address.' });
+      return res.json(genericResponse); // do not reveal whether the account exists
     }
 
     const rawToken = crypto.randomBytes(32).toString('hex');
@@ -144,10 +141,12 @@ async function forgotPassword(req, res) {
       });
     } catch (mailError) {
       console.error('Failed to send password reset email:', mailError.message);
-      return res.status(502).json({ message: 'We found your account, but the reset email could not be sent right now. Please try again shortly.' });
+      // Intentionally still return the generic success response: we do
+      // not want to leak email-delivery failures to an unauthenticated
+      // caller, as that itself could confirm the account's existence.
     }
 
-    res.json({ message: 'A password reset link has been sent to your email address.' });
+    res.json(genericResponse);
   } catch (error) {
     res.status(500).json({ message: 'Server error processing password reset request.', error: error.message });
   }
