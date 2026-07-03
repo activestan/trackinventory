@@ -186,7 +186,7 @@ function AddAssetModal({ categories, users, onClose, onCreated }) {
   const [form, setForm] = useState({
     asset_tag_no: '', asset_name: '', category_id: '', serial_number: '',
     purchase_date: '', purchase_value: 0, location: '', warranty_expiry: '',
-    current_custodian_id: '',
+    review_due_date: '', current_custodian_id: '',
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -249,6 +249,15 @@ function AddAssetModal({ categories, users, onClose, onCreated }) {
           <input type="date" value={form.warranty_expiry} onChange={(e) => updateField('warranty_expiry', e.target.value)} />
         </label>
         <label>
+          Review Due Date
+          <input type="date" value={form.review_due_date} onChange={(e) => updateField('review_due_date', e.target.value)} />
+          <span className="muted" style={{ fontSize: '0.78rem', fontWeight: 400 }}>
+            Optional: a maintenance/inspection date, independent of warranty. An automated alert is
+            sent to Asset Custodians once this date (or the warranty expiry, whichever comes
+            first) has passed.
+          </span>
+        </label>
+        <label>
           Initial Custodian
           <select value={form.current_custodian_id} onChange={(e) => updateField('current_custodian_id', e.target.value)}>
             <option value="">Unassigned</option>
@@ -271,6 +280,7 @@ function EditAssetModal({ asset, categories, onClose, onSaved }) {
     serial_number: asset.serial_number || '',
     location: asset.location || '',
     warranty_expiry: asset.warranty_expiry ? asset.warranty_expiry.slice(0, 10) : '',
+    review_due_date: asset.review_due_date ? asset.review_due_date.slice(0, 10) : '',
     purchase_value: asset.purchase_value || 0,
   });
   const [error, setError] = useState('');
@@ -320,6 +330,13 @@ function EditAssetModal({ asset, categories, onClose, onSaved }) {
         <label>
           Warranty Expiry
           <input type="date" value={form.warranty_expiry} onChange={(e) => updateField('warranty_expiry', e.target.value)} />
+        </label>
+        <label>
+          Review Due Date
+          <input type="date" value={form.review_due_date} onChange={(e) => updateField('review_due_date', e.target.value)} />
+          <span className="muted" style={{ fontSize: '0.78rem', fontWeight: 400 }}>
+            Optional: a maintenance/inspection date, independent of warranty.
+          </span>
         </label>
         <label>
           Purchase Value

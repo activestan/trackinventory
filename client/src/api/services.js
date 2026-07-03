@@ -11,6 +11,14 @@ export const changePassword = (current_password, new_password) =>
     .put('/auth/change-password', { current_password, new_password })
     .then((res) => res.data);
 
+export const forgotPassword = (email) =>
+  axiosClient.post('/auth/forgot-password', { email }).then((res) => res.data);
+
+export const resetPassword = (email, token, new_password) =>
+  axiosClient
+    .post('/auth/reset-password', { email, token, new_password })
+    .then((res) => res.data);
+
 // ---- Users ----
 export const getUsers = () => axiosClient.get('/users').then((res) => res.data);
 export const createUser = (data) => axiosClient.post('/users', data).then((res) => res.data);

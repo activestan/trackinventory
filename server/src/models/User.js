@@ -13,6 +13,8 @@ const UserSchema = new mongoose.Schema(
     },
     department: { type: String, trim: true, default: '' },
     is_active: { type: Boolean, default: true },
+    password_reset_token_hash: { type: String, default: null },
+    password_reset_expires: { type: Date, default: null },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
@@ -29,10 +31,13 @@ UserSchema.methods.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(candidate, this.password_hash);
 };
 
-// Never expose the password hash when a user document is converted to JSON.
+// Never expose the password hash or password-reset token internals when
+// a user document is converted to JSON.
 UserSchema.set('toJSON', {
   transform: (_doc, ret) => {
     delete ret.password_hash;
+    delete ret.password_reset_token_hash;
+    delete ret.password_reset_expires;
     return ret;
   },
 });

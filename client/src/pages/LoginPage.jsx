@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
@@ -59,6 +59,12 @@ export default function LoginPage() {
             {submitting ? 'Signing In...' : 'Login'}
           </button>
         </form>
+
+        <p style={{ marginTop: 16, fontSize: '0.85rem', textAlign: 'center' }}>
+          <Link to="/forgot-password" style={{ color: '#2f6fed', fontWeight: 600 }}>
+            Forgot your password?
+          </Link>
+        </p>
       </div>
     </div>
   );
