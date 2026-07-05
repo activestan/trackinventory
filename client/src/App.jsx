@@ -10,6 +10,8 @@ import UsersPage from './pages/UsersPage';
 import SalesUploadPage from './pages/SalesUploadPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import ActivityLogPage from './pages/ActivityLogPage';
+import AlertSettingsPage from './pages/AlertSettingsPage';
 
 export default function App() {
   return (
@@ -48,6 +50,22 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AlertsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/activity-log"
+            element={
+              <ProtectedRoute>
+                <ActivityLogPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/alert-settings"
+            element={
+              <ProtectedRoute allowedRoles={['Administrator']}>
+                <AlertSettingsPage />
               </ProtectedRoute>
             }
           />

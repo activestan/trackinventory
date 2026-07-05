@@ -3,31 +3,18 @@ const InventoryItem = require('../models/InventoryItem');
 const Asset = require('../models/Asset');
 const Alert = require('../models/Alert');
 const User = require('../models/User');
+const AlertSettings = require('../models/AlertSettings');
 const sendMail = require('../utils/mailer');
 
-// A Failed alert is retried immediately on every check while its attempt
-// count remains below this limit, to recover quickly from a transient
-// delivery problem (e.g. a brief outage of the email provider).
-const MAX_SEND_ATTEMPTS = 5;
-
-// Once an alert for a given condition has been successfully Sent, no new
-// alert is raised for the same condition until this many hours have
-// passed, even if the underlying condition (e.g. low stock) persists.
-// Without this, a condition that remains unresolved between scheduler
-// runs would otherwise generate and send a brand new alert on every
-// single run - including runs triggered every few minutes by an
-// external uptime/cron pinger - flooding recipients with duplicate
-// emails for a problem they have already been told about. After the
-// cooldown elapses, a fresh alert is sent as a reminder that the
-// condition is still unresolved.
-const ALERT_COOLDOWN_HOURS = Number(process.env.ALERT_COOLDOWN_HOURS) || 12;
-
-// If a Failed alert has exhausted MAX_SEND_ATTEMPTS, it is left alone
-// (not retried on every run) until this many hours have passed since its
-// last attempt, at which point it is given a fresh set of attempts. This
-// allows the system to self-heal after a prolonged outage of the email
-// provider without retrying uselessly every few minutes in the meantime.
-const FAILED_RETRY_COOLDOWN_HOURS = Number(process.env.ALERT_FAILED_RETRY_COOLDOWN_HOURS) || 6;
+// Hard-coded fallback values, used only if neither a database-stored
+// AlertSettings document nor the corresponding environment variable is
+// present. These mirror the values that were previously hard-coded
+// directly into this file before the Alert Settings admin page existed.
+const DEFAULT_SETTINGS = {
+  cooldown_hours: Number(process.env.ALERT_COOLDOWN_HOURS) || 12,
+  failed_retry_cooldown_hours: Number(process.env.ALERT_FAILED_RETRY_COOLDOWN_HOURS) || 6,
+  max_send_attempts: Number(process.env.ALERT_MAX_SEND_ATTEMPTS) || 5,
+};
 
 // Roles that receive every alert type regardless of its specific subject
 // matter, reflecting their oversight responsibility over the whole
@@ -47,6 +34,31 @@ const ROLE_SPECIFIC_RECIPIENTS = {
 function hoursSince(date) {
   if (!date) return Infinity;
   return (Date.now() - new Date(date).getTime()) / (1000 * 60 * 60);
+}
+
+/**
+ * Loads the alert engine's currently effective timing settings: whatever
+ * an Administrator has saved via the Alert Settings page (database),
+ * falling back field-by-field to the environment-variable/hard-coded
+ * defaults for anything that has never been explicitly customized. This
+ * is re-read on every check so a settings change takes effect on the
+ * very next scheduler run, without requiring a server restart.
+ */
+async function getEffectiveSettings() {
+  try {
+    const saved = await AlertSettings.findOne().sort({ created_at: -1 });
+    return {
+      cooldown_hours: saved?.cooldown_hours ?? DEFAULT_SETTINGS.cooldown_hours,
+      failed_retry_cooldown_hours: saved?.failed_retry_cooldown_hours ?? DEFAULT_SETTINGS.failed_retry_cooldown_hours,
+      max_send_attempts: saved?.max_send_attempts ?? DEFAULT_SETTINGS.max_send_attempts,
+    };
+  } catch (error) {
+    // If settings can't be loaded for any reason (e.g. a transient DB
+    // hiccup), fail safe to the hard-coded defaults rather than letting
+    // the whole alert check crash.
+    console.error('Could not load alert settings, using defaults:', error.message);
+    return { ...DEFAULT_SETTINGS };
+  }
 }
 
 /**
@@ -79,7 +91,7 @@ async function getAlertRecipients(alertType) {
  * Checks every inventory item for a low-stock condition (quantity_on_hand
  * <= reorder_level) and raises or retries an alert as appropriate.
  */
-async function checkLowStock() {
+async function checkLowStock(settings) {
   const lowStockItems = await InventoryItem.find({
     $expr: { $lte: ['$quantity_on_hand', '$reorder_level'] },
   });
@@ -90,6 +102,7 @@ async function checkLowStock() {
       related_item_id: item._id,
       message: `Low stock alert: "${item.item_name}" (SKU ${item.sku_code}) has ${item.quantity_on_hand} unit(s) remaining, at or below its reorder level of ${item.reorder_level}.`,
       subject: `Low Stock Alert - ${item.item_name}`,
+      settings,
     });
   }
 }
@@ -99,7 +112,7 @@ async function checkLowStock() {
  * review_due_date has passed) and raises or retries an alert as
  * appropriate.
  */
-async function checkAssetReviews() {
+async function checkAssetReviews(settings) {
   const now = new Date();
   const assetsDue = await Asset.find({
     $or: [
@@ -115,6 +128,7 @@ async function checkAssetReviews() {
       related_asset_id: asset._id,
       message: `Asset review alert: "${asset.asset_name}" (Tag ${asset.asset_tag_no}) requires review - its warranty or scheduled review date has passed.`,
       subject: `Asset Review Alert - ${asset.asset_name}`,
+      settings,
     });
   }
 }
@@ -128,14 +142,14 @@ async function checkAssetReviews() {
  *  - Most recent alert is Pending or Failed with attempts remaining:
  *    retry the same alert immediately (transient delivery issue).
  *  - Most recent alert is Failed with attempts exhausted: only retry
- *    (with a fresh attempt count) once FAILED_RETRY_COOLDOWN_HOURS has
+ *    (with a fresh attempt count) once failed_retry_cooldown_hours has
  *    passed since the last attempt, to avoid hammering a broken email
  *    configuration.
  *  - Most recent alert is Sent: the condition was already reported;
- *    only raise a new reminder alert once ALERT_COOLDOWN_HOURS has
- *    passed since it was sent, rather than on every scheduler run.
+ *    only raise a new reminder alert once cooldown_hours has passed
+ *    since it was sent, rather than on every scheduler run.
  */
-async function raiseOrRetryAlert({ alert_type, related_item_id, related_asset_id, message, subject }) {
+async function raiseOrRetryAlert({ alert_type, related_item_id, related_asset_id, message, subject, settings }) {
   const filter = { alert_type };
   if (related_item_id) filter.related_item_id = related_item_id;
   if (related_asset_id) filter.related_asset_id = related_asset_id;
@@ -152,7 +166,7 @@ async function raiseOrRetryAlert({ alert_type, related_item_id, related_asset_id
   }
 
   if (mostRecent.status === 'Sent') {
-    if (hoursSince(mostRecent.date_sent) < ALERT_COOLDOWN_HOURS) {
+    if (hoursSince(mostRecent.date_sent) < settings.cooldown_hours) {
       return; // already notified recently for this condition; do not resend yet
     }
     const alert = await Alert.create({
@@ -164,8 +178,8 @@ async function raiseOrRetryAlert({ alert_type, related_item_id, related_asset_id
   }
 
   // Status is Pending or Failed at this point.
-  if ((mostRecent.send_attempts || 0) >= MAX_SEND_ATTEMPTS) {
-    if (hoursSince(mostRecent.updated_at) < FAILED_RETRY_COOLDOWN_HOURS) {
+  if ((mostRecent.send_attempts || 0) >= settings.max_send_attempts) {
+    if (hoursSince(mostRecent.updated_at) < settings.failed_retry_cooldown_hours) {
       return; // give the failing configuration a rest before trying again
     }
     mostRecent.send_attempts = 0; // fresh set of attempts after the cooldown
@@ -208,11 +222,14 @@ async function dispatchAlertEmail(alert, message, subject) {
 
 /**
  * Runs one full alert-checking cycle immediately (used at server startup
- * and can also be triggered manually for testing).
+ * and can also be triggered manually for testing). Settings are loaded
+ * fresh at the start of each run, so an Administrator's change via the
+ * Alert Settings page is picked up on the very next run.
  */
 async function runAlertCheckNow() {
-  await checkLowStock();
-  await checkAssetReviews();
+  const settings = await getEffectiveSettings();
+  await checkLowStock(settings);
+  await checkAssetReviews(settings);
 }
 
 /**
@@ -236,4 +253,6 @@ function startAlertScheduler() {
   console.log(`Alert scheduler started with schedule: ${schedule}`);
 }
 
-module.exports = { startAlertScheduler, runAlertCheckNow };
+module.exports = {
+  startAlertScheduler, runAlertCheckNow, getEffectiveSettings, DEFAULT_SETTINGS,
+};

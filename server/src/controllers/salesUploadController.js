@@ -161,6 +161,32 @@ async function uploadSalesFile(req, res) {
   }
 }
 
+/**
+ * GET /api/sales-uploads/template
+ * Downloads a ready-to-fill CSV template with the expected column
+ * headers, pre-populated with real SKU codes from the current inventory
+ * (if any exist) as worked examples, so staff preparing a sales file
+ * don't have to guess the correct format or column names.
+ */
+async function downloadTemplate(req, res) {
+  try {
+    const sampleItems = await InventoryItem.find().select('sku_code').limit(2);
+
+    const header = 'sku_code,quantity_sold';
+    const exampleRows = sampleItems.length > 0
+      ? sampleItems.map((item) => `${item.sku_code},1`)
+      : ['SKU-EXAMPLE-001,5', 'SKU-EXAMPLE-002,2'];
+
+    const csv = [header, ...exampleRows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="sales_upload_template.csv"');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ message: 'Error generating sales upload template.', error: error.message });
+  }
+}
+
 // GET /api/sales-uploads - list past upload batches (most recent first)
 async function listSalesUploads(req, res) {
   try {
@@ -187,4 +213,6 @@ async function getSalesUpload(req, res) {
   }
 }
 
-module.exports = { uploadSalesFile, listSalesUploads, getSalesUpload };
+module.exports = {
+  uploadSalesFile, listSalesUploads, getSalesUpload, downloadTemplate,
+};

@@ -11,9 +11,11 @@ const STATUS_BADGE = {
   Retired: 'badge-red',
 };
 
+const PAGE_SIZE = 10;
+
 export default function AssetsPage() {
   const { user } = useAuth();
-  const [assets, setAssets] = useState([]);
+  const [assetsPage, setAssetsPage] = useState({ items: [], page: 1, totalPages: 1, total: 0 });
   const [categories, setCategories] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,16 +25,16 @@ export default function AssetsPage() {
   const [editAssetTarget, setEditAssetTarget] = useState(null);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
 
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+
   const isAdministrator = user?.role === 'Administrator';
 
-  async function loadData() {
-    setLoading(true);
+  async function loadStaticData() {
     try {
-      const [assetsData, catData] = await Promise.all([
-        api.getAssets(),
-        api.getCategories(),
-      ]);
-      setAssets(assetsData);
+      const catData = await api.getCategories();
       setCategories(catData);
       try {
         const usersData = await api.getUsers();
@@ -41,6 +43,22 @@ export default function AssetsPage() {
         setUsers([]); // non-admins cannot list users; that's fine
       }
     } catch (err) {
+      setError('Unable to load supporting data.');
+    }
+  }
+
+  async function loadAssets() {
+    setLoading(true);
+    try {
+      const data = await api.getAssets({
+        search: search || undefined,
+        category_id: categoryFilter || undefined,
+        current_status: statusFilter || undefined,
+        page,
+        limit: PAGE_SIZE,
+      });
+      setAssetsPage(data);
+    } catch (err) {
       setError('Unable to load asset data.');
     } finally {
       setLoading(false);
@@ -48,15 +66,27 @@ export default function AssetsPage() {
   }
 
   useEffect(() => {
-    loadData();
+    loadStaticData();
   }, []);
+
+  useEffect(() => {
+    loadAssets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, categoryFilter, statusFilter, page]);
+
+  function resetToFirstPage(setter) {
+    return (value) => {
+      setter(value);
+      setPage(1);
+    };
+  }
 
   async function handleDeleteConfirmed(asset) {
     setError('');
     try {
       await api.deleteAsset(asset._id);
       setConfirmingDelete(null);
-      loadData();
+      loadAssets();
     } catch (err) {
       setError(err.response?.data?.message || 'Error deleting asset.');
       setConfirmingDelete(null);
@@ -69,6 +99,35 @@ export default function AssetsPage() {
         <button className="btn-primary" onClick={() => setShowAddModal(true)}>
           + Add New Asset
         </button>
+      </div>
+
+      <div className="filter-bar">
+        <input
+          type="text"
+          placeholder="Search by name, tag, or serial number..."
+          value={search}
+          onChange={(e) => resetToFirstPage(setSearch)(e.target.value)}
+          className="filter-input"
+        />
+        <select
+          value={categoryFilter}
+          onChange={(e) => resetToFirstPage(setCategoryFilter)(e.target.value)}
+          className="filter-select"
+        >
+          <option value="">All Categories</option>
+          {categories.map((c) => <option key={c._id} value={c._id}>{c.category_name}</option>)}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => resetToFirstPage(setStatusFilter)(e.target.value)}
+          className="filter-select"
+        >
+          <option value="">All Statuses</option>
+          <option value="Available">Available</option>
+          <option value="In Use">In Use</option>
+          <option value="Under Repair">Under Repair</option>
+          <option value="Retired">Retired</option>
+        </select>
       </div>
 
       {error && <div className="alert-banner alert-banner--error">{error}</div>}
@@ -89,7 +148,7 @@ export default function AssetsPage() {
               </tr>
             </thead>
             <tbody>
-              {assets.map((asset) => (
+              {assetsPage.items.map((asset) => (
                 <tr key={asset._id}>
                   <td>{asset.asset_tag_no}</td>
                   <td>{asset.asset_name}</td>
@@ -122,13 +181,35 @@ export default function AssetsPage() {
                   </td>
                 </tr>
               ))}
-              {assets.length === 0 && (
+              {assetsPage.items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">No assets registered yet. Add your first asset above.</td>
+                  <td colSpan={7} className="muted">
+                    {search || categoryFilter || statusFilter
+                      ? 'No assets match your search/filter.'
+                      : 'No assets registered yet. Add your first asset above.'}
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
+
+          {assetsPage.totalPages > 1 && (
+            <div className="pagination-bar">
+              <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                ← Previous
+              </button>
+              <span className="pagination-info">
+                Page {assetsPage.page} of {assetsPage.totalPages} ({assetsPage.total} assets)
+              </span>
+              <button
+                className="btn-secondary"
+                disabled={page >= assetsPage.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next →
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -137,7 +218,7 @@ export default function AssetsPage() {
           categories={categories}
           users={users}
           onClose={() => setShowAddModal(false)}
-          onCreated={() => { setShowAddModal(false); loadData(); }}
+          onCreated={() => { setShowAddModal(false); loadAssets(); }}
         />
       )}
 
@@ -146,7 +227,7 @@ export default function AssetsPage() {
           asset={transferAssetTarget}
           users={users}
           onClose={() => setTransferAssetTarget(null)}
-          onSaved={() => { setTransferAssetTarget(null); loadData(); }}
+          onSaved={() => { setTransferAssetTarget(null); loadAssets(); }}
         />
       )}
 
@@ -155,7 +236,7 @@ export default function AssetsPage() {
           asset={editAssetTarget}
           categories={categories}
           onClose={() => setEditAssetTarget(null)}
-          onSaved={() => { setEditAssetTarget(null); loadData(); }}
+          onSaved={() => { setEditAssetTarget(null); loadAssets(); }}
         />
       )}
 

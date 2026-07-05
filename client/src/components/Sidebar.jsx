@@ -7,6 +7,8 @@ const NAV_ITEMS = [
   { to: '/assets', label: 'Assets', roles: ['Administrator', 'Asset Custodian', 'Manager'] },
   { to: '/sales-upload', label: 'Sales Upload', roles: ['Administrator', 'Manager', 'Store Officer'] },
   { to: '/alerts', label: 'Alerts', roles: ['Administrator', 'Store Officer', 'Asset Custodian', 'Manager'] },
+  { to: '/activity-log', label: 'Activity Log', roles: ['Administrator', 'Store Officer', 'Asset Custodian', 'Manager'] },
+  { to: '/alert-settings', label: 'Alert Settings', roles: ['Administrator'] },
   { to: '/users', label: 'Users', roles: ['Administrator'] },
 ];
 

@@ -1,5 +1,42 @@
 const Alert = require('../models/Alert');
-const { runAlertCheckNow } = require('../jobs/alertScheduler');
+const { runAlertCheckNow, getEffectiveSettings } = require('../jobs/alertScheduler');
+
+/**
+ * Annotates a raised alert document with information about when (if
+ * ever) the next reminder/retry for its underlying condition will be
+ * considered, so the UI can show something more informative than a bare
+ * status badge (e.g. "next reminder at 14:30" instead of leaving staff
+ * to wonder why a still-unresolved low-stock condition hasn't triggered
+ * another email yet).
+ */
+function annotateCooldownState(alertDoc, settings) {
+  const alert = alertDoc.toObject ? alertDoc.toObject() : alertDoc;
+
+  if (alert.status === 'Sent' && alert.date_sent) {
+    const nextReminderAt = new Date(new Date(alert.date_sent).getTime() + settings.cooldown_hours * 60 * 60 * 1000);
+    alert.cooldown_info = {
+      state: 'cooling_down',
+      next_reminder_at: nextReminderAt,
+      cooldown_hours: settings.cooldown_hours,
+    };
+  } else if (alert.status === 'Failed' && (alert.send_attempts || 0) >= settings.max_send_attempts) {
+    const nextRetryAt = new Date(new Date(alert.updated_at).getTime() + settings.failed_retry_cooldown_hours * 60 * 60 * 1000);
+    alert.cooldown_info = {
+      state: 'retry_cooldown',
+      next_reminder_at: nextRetryAt,
+      cooldown_hours: settings.failed_retry_cooldown_hours,
+    };
+  } else if (alert.status === 'Failed' || alert.status === 'Pending') {
+    alert.cooldown_info = {
+      state: 'retrying_immediately',
+      attempts_remaining: Math.max(settings.max_send_attempts - (alert.send_attempts || 0), 0),
+    };
+  } else {
+    alert.cooldown_info = { state: 'none' };
+  }
+
+  return alert;
+}
 
 // GET /api/alerts - list all alerts (most recent first)
 async function listAlerts(req, res) {
@@ -9,12 +46,15 @@ async function listAlerts(req, res) {
     if (status) filter.status = status;
     if (alert_type) filter.alert_type = alert_type;
 
-    const alerts = await Alert.find(filter)
-      .populate('related_item_id', 'item_name sku_code quantity_on_hand reorder_level')
-      .populate('related_asset_id', 'asset_tag_no asset_name')
-      .sort({ date_generated: -1 });
+    const [alerts, settings] = await Promise.all([
+      Alert.find(filter)
+        .populate('related_item_id', 'item_name sku_code quantity_on_hand reorder_level')
+        .populate('related_asset_id', 'asset_tag_no asset_name')
+        .sort({ date_generated: -1 }),
+      getEffectiveSettings(),
+    ]);
 
-    res.json(alerts);
+    res.json(alerts.map((a) => annotateCooldownState(a, settings)));
   } catch (error) {
     res.status(500).json({ message: 'Error fetching alerts.', error: error.message });
   }
@@ -32,6 +72,52 @@ async function alertSummary(req, res) {
     res.json({ pending, sentToday, total });
   } catch (error) {
     res.status(500).json({ message: 'Error fetching alert summary.', error: error.message });
+  }
+}
+
+/**
+ * GET /api/alerts/history/export
+ * Returns the full alert history as a downloadable CSV, for record
+ * keeping/reporting outside the application (e.g. attaching to a
+ * monthly operations report).
+ */
+async function exportAlertHistoryCsv(req, res) {
+  try {
+    const alerts = await Alert.find()
+      .populate('related_item_id', 'item_name sku_code')
+      .populate('related_asset_id', 'asset_tag_no asset_name')
+      .sort({ date_generated: -1 });
+
+    const escapeCsv = (value) => {
+      const str = value === null || value === undefined ? '' : String(value);
+      return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const header = ['Alert Type', 'Related To', 'Message', 'Status', 'Date Generated', 'Date Sent', 'Send Attempts'];
+    const rows = alerts.map((a) => {
+      const relatedTo = a.related_item_id
+        ? `${a.related_item_id.item_name} (${a.related_item_id.sku_code})`
+        : a.related_asset_id
+          ? `${a.related_asset_id.asset_name} (${a.related_asset_id.asset_tag_no})`
+          : '';
+      return [
+        a.alert_type,
+        relatedTo,
+        a.message,
+        a.status,
+        a.date_generated ? new Date(a.date_generated).toISOString() : '',
+        a.date_sent ? new Date(a.date_sent).toISOString() : '',
+        a.send_attempts || 0,
+      ].map(escapeCsv).join(',');
+    });
+
+    const csv = [header.join(','), ...rows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="alert_history.csv"');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ message: 'Error exporting alert history.', error: error.message });
   }
 }
 
@@ -85,4 +171,6 @@ async function triggerAlertCheck(req, res) {
   }
 }
 
-module.exports = { listAlerts, alertSummary, triggerAlertCheck };
+module.exports = {
+  listAlerts, alertSummary, triggerAlertCheck, exportAlertHistoryCsv,
+};

@@ -30,6 +30,15 @@ export default function DashboardPage() {
 
   return (
     <AppLayout title="Inventory Overview">
+      <div className="page-toolbar">
+        <button className="btn-secondary" onClick={() => api.exportDashboardPdf()}>
+          ⬇ Download PDF Summary
+        </button>
+        <button className="btn-secondary" onClick={() => api.exportStockByCategoryCsv()}>
+          ⬇ Export Category CSV
+        </button>
+      </div>
+
       {loading && <p>Loading dashboard...</p>}
       {error && <div className="alert-banner alert-banner--error">{error}</div>}
 

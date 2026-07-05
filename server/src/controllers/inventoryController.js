@@ -1,14 +1,61 @@
 const InventoryItem = require('../models/InventoryItem');
 const StockTransaction = require('../models/StockTransaction');
 
-// GET /api/inventory - list all inventory items (with category/supplier populated)
+/**
+ * GET /api/inventory - list inventory items, with optional search,
+ * category filter, low-stock filter, and pagination.
+ *
+ * Query params (all optional):
+ *   search        - case-insensitive match against item_name or sku_code
+ *   category_id   - restrict to a single category
+ *   low_stock     - "true" to return only items at/below their reorder level
+ *   page, limit   - pagination (defaults: page=1, limit=0 meaning "all",
+ *                   to preserve the original unpaginated behaviour for any
+ *                   existing caller that does not pass these params)
+ *
+ * When page/limit are supplied, the response is an object
+ * { items, page, limit, total, totalPages } instead of a bare array, so
+ * the frontend can render pagination controls. When they are omitted,
+ * the response remains a bare array of items exactly as before, so this
+ * change is backward compatible with any caller that doesn't opt in.
+ */
 async function listItems(req, res) {
   try {
-    const items = await InventoryItem.find()
+    const { search, category_id, low_stock, page, limit } = req.query;
+
+    const filter = {};
+    if (category_id) filter.category_id = category_id;
+    if (search) {
+      const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ item_name: regex }, { sku_code: regex }];
+    }
+    if (low_stock === 'true') {
+      filter.$expr = { $lte: ['$quantity_on_hand', '$reorder_level'] };
+    }
+
+    const query = InventoryItem.find(filter)
       .populate('category_id', 'category_name')
       .populate('supplier_id', 'supplier_name')
       .sort({ item_name: 1 });
-    res.json(items);
+
+    if (!page && !limit) {
+      const items = await query;
+      return res.json(items);
+    }
+
+    const pageNum = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 10, 1), 200);
+    const total = await InventoryItem.countDocuments(filter);
+
+    const items = await query.skip((pageNum - 1) * pageSize).limit(pageSize);
+
+    res.json({
+      items,
+      page: pageNum,
+      limit: pageSize,
+      total,
+      totalPages: Math.max(Math.ceil(total / pageSize), 1),
+    });
   } catch (error) {
     res.status(500).json({ message: 'Error fetching inventory items.', error: error.message });
   }

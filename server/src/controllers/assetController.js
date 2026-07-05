@@ -1,14 +1,55 @@
 const Asset = require('../models/Asset');
 const AssetMovementLog = require('../models/AssetMovementLog');
 
-// GET /api/assets - list all assets
+/**
+ * GET /api/assets - list assets, with optional search, category/status
+ * filters, and pagination.
+ *
+ * Query params (all optional):
+ *   search        - case-insensitive match against asset_name, asset_tag_no, or serial_number
+ *   category_id   - restrict to a single category
+ *   current_status - restrict to a single status (Available/In Use/Under Repair/Retired)
+ *   page, limit   - pagination; response shape switches to
+ *                   { items, page, limit, total, totalPages } only when
+ *                   these are supplied, keeping the endpoint backward
+ *                   compatible with existing callers that expect a bare
+ *                   array.
+ */
 async function listAssets(req, res) {
   try {
-    const assets = await Asset.find()
+    const { search, category_id, current_status, page, limit } = req.query;
+
+    const filter = {};
+    if (category_id) filter.category_id = category_id;
+    if (current_status) filter.current_status = current_status;
+    if (search) {
+      const regex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ asset_name: regex }, { asset_tag_no: regex }, { serial_number: regex }];
+    }
+
+    const query = Asset.find(filter)
       .populate('category_id', 'category_name')
       .populate('current_custodian_id', 'full_name department')
       .sort({ asset_name: 1 });
-    res.json(assets);
+
+    if (!page && !limit) {
+      const assets = await query;
+      return res.json(assets);
+    }
+
+    const pageNum = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 10, 1), 200);
+    const total = await Asset.countDocuments(filter);
+
+    const assets = await query.skip((pageNum - 1) * pageSize).limit(pageSize);
+
+    res.json({
+      items: assets,
+      page: pageNum,
+      limit: pageSize,
+      total,
+      totalPages: Math.max(Math.ceil(total / pageSize), 1),
+    });
   } catch (error) {
     res.status(500).json({ message: 'Error fetching assets.', error: error.message });
   }

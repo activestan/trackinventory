@@ -35,7 +35,16 @@ export const getSuppliers = () => axiosClient.get('/suppliers').then((res) => re
 export const createSupplier = (data) => axiosClient.post('/suppliers', data).then((res) => res.data);
 
 // ---- Inventory ----
-export const getInventoryItems = () => axiosClient.get('/inventory').then((res) => res.data);
+// Accepts an optional params object (search, category_id, low_stock,
+// page, limit). When page/limit are omitted, the backend returns a bare
+// array (unchanged legacy shape); when supplied, it returns
+// { items, page, limit, total, totalPages } for pagination controls.
+export const getInventoryItems = (params = {}) => {
+  const query = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v !== undefined && v !== null))
+  ).toString();
+  return axiosClient.get(`/inventory${query ? `?${query}` : ''}`).then((res) => res.data);
+};
 export const getInventoryItem = (id) => axiosClient.get(`/inventory/${id}`).then((res) => res.data);
 export const createInventoryItem = (data) => axiosClient.post('/inventory', data).then((res) => res.data);
 export const updateInventoryItem = (id, data) => axiosClient.put(`/inventory/${id}`, data).then((res) => res.data);
@@ -48,7 +57,15 @@ export const getRecentTransactions = (limit = 10) =>
   axiosClient.get(`/inventory/transactions/recent?limit=${limit}`).then((res) => res.data);
 
 // ---- Assets ----
-export const getAssets = () => axiosClient.get('/assets').then((res) => res.data);
+// Accepts an optional params object (search, category_id, current_status,
+// page, limit) — same bare-array-vs-paginated-object behaviour as
+// getInventoryItems above.
+export const getAssets = (params = {}) => {
+  const query = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v !== undefined && v !== null))
+  ).toString();
+  return axiosClient.get(`/assets${query ? `?${query}` : ''}`).then((res) => res.data);
+};
 export const getAsset = (id) => axiosClient.get(`/assets/${id}`).then((res) => res.data);
 export const createAsset = (data) => axiosClient.post('/assets', data).then((res) => res.data);
 export const updateAsset = (id, data) => axiosClient.put(`/assets/${id}`, data).then((res) => res.data);
@@ -64,9 +81,46 @@ export const getAlerts = (params = {}) => {
 };
 export const getAlertSummary = () => axiosClient.get('/alerts/summary').then((res) => res.data);
 
+// Downloads the alert history as a CSV file, triggering a browser save
+// dialog by creating a temporary object URL from the response blob.
+export const exportAlertHistoryCsv = () =>
+  axiosClient.get('/alerts/history/export', { responseType: 'blob' }).then((res) => downloadBlob(res.data, 'alert_history.csv'));
+
+// ---- Alert Settings (admin-configurable cooldown timing) ----
+export const getAlertSettings = () => axiosClient.get('/alerts/settings').then((res) => res.data);
+export const updateAlertSettings = (data) => axiosClient.put('/alerts/settings', data).then((res) => res.data);
+
 // ---- Reports / Dashboard ----
 export const getDashboardSummary = () => axiosClient.get('/reports/dashboard').then((res) => res.data);
 export const getStockByCategory = () => axiosClient.get('/reports/stock-by-category').then((res) => res.data);
+export const exportStockByCategoryCsv = () =>
+  axiosClient.get('/reports/stock-by-category/export', { responseType: 'blob' }).then((res) => downloadBlob(res.data, 'stock_by_category.csv'));
+export const exportDashboardPdf = () =>
+  axiosClient.get('/reports/dashboard/export', { responseType: 'blob' }).then((res) => downloadBlob(res.data, 'dashboard_summary.pdf'));
+
+// ---- Activity Log (merged stock transactions + asset movements) ----
+export const getActivityLog = (params = {}) => {
+  const query = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v !== '' && v !== undefined && v !== null))
+  ).toString();
+  return axiosClient.get(`/activity-log${query ? `?${query}` : ''}`).then((res) => res.data);
+};
+
+/**
+ * Shared helper for every "download as file" API call above: takes a
+ * Blob response body and a suggested filename, and triggers the
+ * browser's native download behaviour via a temporary anchor element.
+ */
+function downloadBlob(blob, filename) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
 
 // ---- Sales Uploads ----
 export const uploadSalesFile = (file) => {
@@ -78,3 +132,5 @@ export const uploadSalesFile = (file) => {
 };
 export const getSalesUploads = () => axiosClient.get('/sales-uploads').then((res) => res.data);
 export const getSalesUpload = (id) => axiosClient.get(`/sales-uploads/${id}`).then((res) => res.data);
+export const downloadSalesUploadTemplate = () =>
+  axiosClient.get('/sales-uploads/template', { responseType: 'blob' }).then((res) => downloadBlob(res.data, 'sales_upload_template.csv'));

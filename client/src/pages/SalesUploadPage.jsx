@@ -68,6 +68,14 @@ export default function SalesUploadPage() {
           <pre style={{ margin: '8px 0 0', fontSize: '0.82rem', background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #e4e7ec' }}>
 sku,quantity{'\n'}NET-CAT6-001,2{'\n'}COM-MSE-004,3{'\n'}CON-TNR-003,1
           </pre>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ marginTop: 12 }}
+            onClick={() => api.downloadSalesUploadTemplate()}
+          >
+            ⬇ Download a Ready-to-Fill CSV Template
+          </button>
         </div>
 
         {error && <div className="alert-banner alert-banner--error">{error}</div>}

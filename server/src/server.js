@@ -1,4 +1,8 @@
 require('dotenv').config();
+const validateEnv = require('./utils/validateEnv');
+
+validateEnv();
+
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
@@ -14,6 +18,7 @@ const assetRoutes = require('./routes/assetRoutes');
 const alertRoutes = require('./routes/alertRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const salesUploadRoutes = require('./routes/salesUploadRoutes');
+const activityLogRoutes = require('./routes/activityLogRoutes');
 
 const app = express();
 
@@ -36,6 +41,7 @@ app.use('/api/assets', assetRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/sales-uploads', salesUploadRoutes);
+app.use('/api/activity-log', activityLogRoutes);
 
 // ---- 404 handler ----
 app.use((req, res) => {

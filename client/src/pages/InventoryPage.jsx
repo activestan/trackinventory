@@ -3,8 +3,10 @@ import AppLayout from '../components/AppLayout';
 import Modal from '../components/Modal';
 import * as api from '../api/services';
 
+const PAGE_SIZE = 10;
+
 export default function InventoryPage() {
-  const [items, setItems] = useState([]);
+  const [itemsPage, setItemsPage] = useState({ items: [], page: 1, totalPages: 1, total: 0 });
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -12,17 +14,32 @@ export default function InventoryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [transactionItem, setTransactionItem] = useState(null);
 
-  async function loadData() {
-    setLoading(true);
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [page, setPage] = useState(1);
+
+  async function loadStaticData() {
     try {
-      const [itemsData, catData, supData] = await Promise.all([
-        api.getInventoryItems(),
-        api.getCategories(),
-        api.getSuppliers(),
-      ]);
-      setItems(itemsData);
+      const [catData, supData] = await Promise.all([api.getCategories(), api.getSuppliers()]);
       setCategories(catData);
       setSuppliers(supData);
+    } catch (err) {
+      setError('Unable to load supporting data.');
+    }
+  }
+
+  async function loadItems() {
+    setLoading(true);
+    try {
+      const data = await api.getInventoryItems({
+        search: search || undefined,
+        category_id: categoryFilter || undefined,
+        low_stock: lowStockOnly ? 'true' : undefined,
+        page,
+        limit: PAGE_SIZE,
+      });
+      setItemsPage(data);
     } catch (err) {
       setError('Unable to load inventory data.');
     } finally {
@@ -31,8 +48,20 @@ export default function InventoryPage() {
   }
 
   useEffect(() => {
-    loadData();
+    loadStaticData();
   }, []);
+
+  useEffect(() => {
+    loadItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, categoryFilter, lowStockOnly, page]);
+
+  function resetToFirstPage(setter) {
+    return (value) => {
+      setter(value);
+      setPage(1);
+    };
+  }
 
   return (
     <AppLayout title="Inventory Management">
@@ -40,6 +69,35 @@ export default function InventoryPage() {
         <button className="btn-primary" onClick={() => setShowAddModal(true)}>
           + Add New Item
         </button>
+        <button className="btn-secondary" onClick={() => api.exportStockByCategoryCsv()}>
+          ⬇ Export Stock-by-Category CSV
+        </button>
+      </div>
+
+      <div className="filter-bar">
+        <input
+          type="text"
+          placeholder="Search by item name or SKU..."
+          value={search}
+          onChange={(e) => resetToFirstPage(setSearch)(e.target.value)}
+          className="filter-input"
+        />
+        <select
+          value={categoryFilter}
+          onChange={(e) => resetToFirstPage(setCategoryFilter)(e.target.value)}
+          className="filter-select"
+        >
+          <option value="">All Categories</option>
+          {categories.map((c) => <option key={c._id} value={c._id}>{c.category_name}</option>)}
+        </select>
+        <label className="filter-checkbox">
+          <input
+            type="checkbox"
+            checked={lowStockOnly}
+            onChange={(e) => resetToFirstPage(setLowStockOnly)(e.target.checked)}
+          />
+          Low stock only
+        </label>
       </div>
 
       {error && <div className="alert-banner alert-banner--error">{error}</div>}
@@ -60,7 +118,7 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {itemsPage.items.map((item) => (
                 <tr key={item._id}>
                   <td>{item.item_name}</td>
                   <td>{item.sku_code}</td>
@@ -79,13 +137,35 @@ export default function InventoryPage() {
                   </td>
                 </tr>
               ))}
-              {items.length === 0 && (
+              {itemsPage.items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">No inventory items yet. Add your first item above.</td>
+                  <td colSpan={7} className="muted">
+                    {search || categoryFilter || lowStockOnly
+                      ? 'No inventory items match your search/filter.'
+                      : 'No inventory items yet. Add your first item above.'}
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
+
+          {itemsPage.totalPages > 1 && (
+            <div className="pagination-bar">
+              <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                ← Previous
+              </button>
+              <span className="pagination-info">
+                Page {itemsPage.page} of {itemsPage.totalPages} ({itemsPage.total} items)
+              </span>
+              <button
+                className="btn-secondary"
+                disabled={page >= itemsPage.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next →
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -94,7 +174,7 @@ export default function InventoryPage() {
           categories={categories}
           suppliers={suppliers}
           onClose={() => setShowAddModal(false)}
-          onCreated={() => { setShowAddModal(false); loadData(); }}
+          onCreated={() => { setShowAddModal(false); loadItems(); }}
         />
       )}
 
@@ -102,7 +182,7 @@ export default function InventoryPage() {
         <StockTransactionModal
           item={transactionItem}
           onClose={() => setTransactionItem(null)}
-          onSaved={() => { setTransactionItem(null); loadData(); }}
+          onSaved={() => { setTransactionItem(null); loadItems(); }}
         />
       )}
     </AppLayout>

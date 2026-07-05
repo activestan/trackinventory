@@ -2,7 +2,9 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
-const { uploadSalesFile, listSalesUploads, getSalesUpload } = require('../controllers/salesUploadController');
+const {
+  uploadSalesFile, listSalesUploads, getSalesUpload, downloadTemplate,
+} = require('../controllers/salesUploadController');
 
 // Sales files are small (a day's worth of transactions) and are parsed
 // entirely in memory rather than written to disk, since the deployed
@@ -23,6 +25,7 @@ const upload = multer({
 router.use(authenticate, authorize('Administrator', 'Manager', 'Store Officer'));
 
 router.post('/', upload.single('file'), uploadSalesFile);
+router.get('/template', downloadTemplate);
 router.get('/', listSalesUploads);
 router.get('/:id', getSalesUpload);
 
