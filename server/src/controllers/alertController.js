@@ -134,9 +134,10 @@ let alertCheckInProgress = false;
  * checks), the same logic normally triggered by the scheduled cron job.
  * Intended to be called by an external uptime/cron pinger (e.g.
  * cron-job.org) so that alert checks are not missed if the in-process
- * node-cron timer happens to fire while the server is asleep on
- * free-tier hosting. Protected by a shared secret rather than a user
- * JWT, since external pingers cannot log in as a user.
+ * node-cron timer happens to fire while the server is asleep on the
+ * hosting platform's web service tier. Protected by a shared secret
+ * rather than a user JWT, since external pingers cannot log in as a
+ * user.
  *
  * Responds immediately once the check has been started (or if one is
  * already running), rather than waiting for the entire check - including
@@ -171,6 +172,40 @@ async function triggerAlertCheck(req, res) {
   }
 }
 
+/**
+ * POST /api/alerts/check-now
+ * Lets a logged-in Administrator or Manager trigger an immediate alert
+ * check from within the app itself (e.g. the "Check Alerts Now" button
+ * on the Alerts page), instead of waiting for the next scheduled run
+ * (every ALERT_CRON_SCHEDULE interval, 30 minutes by default) or for an
+ * external pinger. Useful for demonstrations and for confirming a
+ * newly-lowered stock item triggers its alert right away.
+ *
+ * Protected by normal JWT authentication + role check rather than the
+ * shared ALERT_TRIGGER_KEY used by triggerAlertCheck() above, since a
+ * secret key must never be embedded in front-end code where any visitor
+ * could read it from the browser.
+ *
+ * Waits for the check to finish (unlike the external-pinger endpoint)
+ * so the UI can immediately refresh and show any newly generated
+ * alerts/sent emails, which matters for a live demonstration.
+ */
+async function triggerAlertCheckAuthenticated(req, res) {
+  if (alertCheckInProgress) {
+    return res.status(202).json({ message: 'An alert check is already in progress; please wait a moment and refresh.' });
+  }
+
+  alertCheckInProgress = true;
+  try {
+    await runAlertCheckNow();
+    res.json({ message: 'Alert check completed.', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ message: 'Error running alert check.', error: error.message });
+  } finally {
+    alertCheckInProgress = false;
+  }
+}
+
 module.exports = {
-  listAlerts, alertSummary, triggerAlertCheck, exportAlertHistoryCsv,
+  listAlerts, alertSummary, triggerAlertCheck, triggerAlertCheckAuthenticated, exportAlertHistoryCsv,
 };

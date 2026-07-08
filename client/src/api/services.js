@@ -81,6 +81,12 @@ export const getAlerts = (params = {}) => {
 };
 export const getAlertSummary = () => axiosClient.get('/alerts/summary').then((res) => res.data);
 
+// Triggers an immediate alert check (Administrator/Manager only),
+// instead of waiting for the next scheduled check (every 30 minutes by
+// default). Waits for the check to finish so the caller can immediately
+// reload the alert list afterward.
+export const checkAlertsNow = () => axiosClient.post('/alerts/check-now').then((res) => res.data);
+
 // Downloads the alert history as a CSV file, triggering a browser save
 // dialog by creating a temporary object URL from the response blob.
 export const exportAlertHistoryCsv = () =>

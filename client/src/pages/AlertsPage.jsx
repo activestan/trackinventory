@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '../components/AppLayout';
 import * as api from '../api/services';
+import { useAuth } from '../context/AuthContext';
 
 const TYPE_LABEL = {
   'Low-Stock': { icon: '⚠️', color: 'red' },
@@ -25,9 +26,14 @@ function cooldownLabel(alert) {
 }
 
 export default function AlertsPage() {
+  const { user } = useAuth();
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [checkMessage, setCheckMessage] = useState('');
+
+  const canTriggerCheck = user?.role === 'Administrator' || user?.role === 'Manager';
 
   async function load() {
     setLoading(true);
@@ -41,6 +47,21 @@ export default function AlertsPage() {
     }
   }
 
+  async function handleCheckNow() {
+    setChecking(true);
+    setCheckMessage('');
+    setError('');
+    try {
+      await api.checkAlertsNow();
+      setCheckMessage('Alert check completed. Any new or due alerts below have just been generated/emailed.');
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Unable to run the alert check right now.');
+    } finally {
+      setChecking(false);
+    }
+  }
+
   useEffect(() => {
     load();
   }, []);
@@ -48,11 +69,24 @@ export default function AlertsPage() {
   return (
     <AppLayout title="Alerts & Notifications">
       <div className="page-toolbar">
+        {canTriggerCheck && (
+          <button className="btn-primary" onClick={handleCheckNow} disabled={checking}>
+            {checking ? '⏳ Checking...' : '🔔 Check Alerts Now'}
+          </button>
+        )}
         <button className="btn-secondary" onClick={() => api.exportAlertHistoryCsv()}>
           ⬇ Export Alert History CSV
         </button>
       </div>
 
+      {canTriggerCheck && (
+        <p className="muted" style={{ marginTop: -8, marginBottom: 16, fontSize: '0.85rem' }}>
+          The system automatically checks stock and asset conditions every 30 minutes. Use "Check
+          Alerts Now" to run that same check immediately, e.g. for a live demonstration.
+        </p>
+      )}
+
+      {checkMessage && <div className="alert-banner alert-banner--success">{checkMessage}</div>}
       {error && <div className="alert-banner alert-banner--error">{error}</div>}
       {loading ? (
         <p>Loading alerts...</p>
