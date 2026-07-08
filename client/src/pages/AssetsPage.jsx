@@ -468,6 +468,10 @@ function TransferAssetModal({ asset, users, onClose, onSaved }) {
             <option value="">Unassigned</option>
             {users.map((u) => <option key={u._id} value={u._id}>{u.full_name}</option>)}
           </select>
+          <span className="muted" style={{ fontSize: '0.78rem', fontWeight: 400 }}>
+            Changing this sends an immediate email to the newly assigned person (and to the
+            previous custodian, if any) confirming the change.
+          </span>
         </label>
         <label>
           Status / Condition

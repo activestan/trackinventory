@@ -1,5 +1,69 @@
 const Asset = require('../models/Asset');
 const AssetMovementLog = require('../models/AssetMovementLog');
+const User = require('../models/User');
+const sendMail = require('../utils/mailer');
+
+/**
+ * Sends a direct, immediate notification email about a custodian change
+ * for one asset. Unlike the Low-Stock/Asset-Review alerts, this is a
+ * one-time event (not a recurring condition to be re-checked on a
+ * schedule), so it deliberately does NOT go through the Alert
+ * model/cooldown system - it is simply sent once, right when the
+ * reassignment happens.
+ *
+ * Failure to send is logged but never blocks the actual reassignment:
+ * an email provider hiccup should not prevent a legitimate custodian
+ * change from being recorded.
+ */
+async function notifyCustodianChange({ asset, toUser, fromUser }) {
+  const attempts = [];
+
+  if (toUser?.email) {
+    attempts.push(
+      sendMail({
+        to: toUser.email,
+        subject: `Asset Assigned to You - ${asset.asset_name}`,
+        text: `You have been assigned "${asset.asset_name}" (Tag ${asset.asset_tag_no}). Please confirm receipt and its condition with your Administrator if anything looks incorrect.`,
+      })
+    );
+  }
+
+  if (fromUser?.email) {
+    attempts.push(
+      sendMail({
+        to: fromUser.email,
+        subject: `Asset Reassigned From You - ${asset.asset_name}`,
+        text: `"${asset.asset_name}" (Tag ${asset.asset_tag_no}) has been reassigned away from you and is no longer your responsibility.`,
+      })
+    );
+  }
+
+  const results = await Promise.allSettled(attempts);
+  results.forEach((result) => {
+    if (result.status === 'rejected') {
+      console.error('Failed to send asset custodian-change notification:', result.reason?.message || result.reason);
+    }
+  });
+}
+
+/**
+ * Sends a direct, immediate notification when an asset is unassigned
+ * (returned to "Available" with no custodian), informing the previous
+ * custodian that it is no longer their responsibility.
+ */
+async function notifyCustodianUnassigned({ asset, fromUser }) {
+  if (!fromUser?.email) return;
+  try {
+    await sendMail({
+      to: fromUser.email,
+      subject: `Asset Unassigned From You - ${asset.asset_name}`,
+      text: `"${asset.asset_name}" (Tag ${asset.asset_tag_no}) has been unassigned from you and is no longer your responsibility.`,
+    });
+  } catch (error) {
+    console.error('Failed to send asset unassignment notification:', error.message);
+  }
+}
+
 
 /**
  * GET /api/assets - list assets, with optional search, category/status
@@ -131,7 +195,17 @@ async function updateAsset(req, res) {
 /**
  * POST /api/assets/:id/transfer
  * Assigns or transfers an asset to a new custodian, automatically
- * logging the change in the AssetMovementLog (Objective 2).
+ * logging the change in the AssetMovementLog (Objective 2), and
+ * emailing the affected user(s) directly and immediately:
+ *   - Reassigned to someone: the new custodian is emailed ("assigned to
+ *     you"), and if there was a previous custodian, they are also
+ *     emailed ("reassigned from you").
+ *   - Unassigned (to_user_id omitted/empty): the previous custodian, if
+ *     any, is emailed ("unassigned from you").
+ * These are immediate, one-time notifications, separate from the
+ * scheduled Low-Stock/Asset-Review alert engine, since a custodian
+ * change is a single event rather than a recurring condition to
+ * re-check.
  */
 async function transferAsset(req, res) {
   try {
@@ -153,6 +227,17 @@ async function transferAsset(req, res) {
       condition_note: condition_note || '',
       status_at_movement: asset.current_status,
     });
+
+    // Fire the notification email(s) without making the API response
+    // wait for delivery to complete, so a slow/failing email provider
+    // never delays or blocks the reassignment itself.
+    const fromUser = fromUserId ? await User.findById(fromUserId).select('full_name email') : null;
+    if (to_user_id) {
+      const toUser = await User.findById(to_user_id).select('full_name email');
+      notifyCustodianChange({ asset, toUser, fromUser }).catch(() => {});
+    } else if (fromUser) {
+      notifyCustodianUnassigned({ asset, fromUser }).catch(() => {});
+    }
 
     res.json({ asset, log });
   } catch (error) {
