@@ -3,12 +3,18 @@ const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const {
   listAlerts, alertSummary, triggerAlertCheck, triggerAlertCheckAuthenticated, exportAlertHistoryCsv,
+  clearAlertHistory,
 } = require('../controllers/alertController');
 const { getSettings, updateSettings } = require('../controllers/alertSettingsController');
 
 router.get('/', authenticate, listAlerts);
 router.get('/summary', authenticate, alertSummary);
 router.get('/history/export', authenticate, exportAlertHistoryCsv);
+
+// Permanently clears all alert history. Administrator only, since this
+// is a destructive, irreversible action (though it only affects
+// notification bookkeeping, never actual stock/asset data).
+router.delete('/', authenticate, authorize('Administrator'), clearAlertHistory);
 
 // Alert Settings: lets an Administrator adjust the alert engine's
 // cooldown/retry timing from the UI instead of Render environment

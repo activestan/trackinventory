@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import AppLayout from '../components/AppLayout';
+import Modal from '../components/Modal';
 import * as api from '../api/services';
 import { useAuth } from '../context/AuthContext';
 
@@ -32,8 +33,11 @@ export default function AlertsPage() {
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
   const [checkMessage, setCheckMessage] = useState('');
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const canTriggerCheck = user?.role === 'Administrator' || user?.role === 'Manager';
+  const canClearHistory = user?.role === 'Administrator';
 
   async function load() {
     setLoading(true);
@@ -62,6 +66,21 @@ export default function AlertsPage() {
     }
   }
 
+  async function handleClearHistoryConfirmed() {
+    setClearing(true);
+    setError('');
+    setCheckMessage('');
+    try {
+      await api.clearAlertHistory();
+      setConfirmingClear(false);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Unable to clear alert history right now.');
+    } finally {
+      setClearing(false);
+    }
+  }
+
   useEffect(() => {
     load();
   }, []);
@@ -77,6 +96,15 @@ export default function AlertsPage() {
         <button className="btn-secondary" onClick={() => api.exportAlertHistoryCsv()}>
           ⬇ Export Alert History CSV
         </button>
+        {canClearHistory && alerts.length > 0 && (
+          <button
+            className="btn-secondary"
+            style={{ color: '#dc2626' }}
+            onClick={() => setConfirmingClear(true)}
+          >
+            🗑 Clear Alert History
+          </button>
+        )}
       </div>
 
       {canTriggerCheck && (
@@ -120,6 +148,28 @@ export default function AlertsPage() {
             );
           })}
         </div>
+      )}
+
+      {confirmingClear && (
+        <Modal title="Confirm Clear Alert History" onClose={() => setConfirmingClear(false)}>
+          <p>
+            Are you sure you want to permanently clear all {alerts.length} alert record(s)? This
+            cannot be undone. It does not change any stock quantities or asset custodianship —
+            only the alert engine's record of what has already been reported. Any condition that
+            is still unresolved will be treated as brand new and re-notified on the next check.
+          </p>
+          <div className="form-actions">
+            <button className="btn-secondary" onClick={() => setConfirmingClear(false)}>Cancel</button>
+            <button
+              className="btn-primary"
+              style={{ background: '#dc2626' }}
+              onClick={handleClearHistoryConfirmed}
+              disabled={clearing}
+            >
+              {clearing ? 'Clearing...' : 'Yes, Clear History'}
+            </button>
+          </div>
+        </Modal>
       )}
     </AppLayout>
   );

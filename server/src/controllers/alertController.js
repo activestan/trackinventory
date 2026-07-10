@@ -206,6 +206,30 @@ async function triggerAlertCheckAuthenticated(req, res) {
   }
 }
 
+/**
+ * DELETE /api/alerts
+ * Permanently clears all alert history (Administrator only). Unlike
+ * stock transactions and asset movement logs - which are intentionally
+ * never deletable, since they form the system's core audit trail of
+ * what physically happened to inventory/assets - alert records are
+ * purely notification bookkeeping (when a warning was raised/sent).
+ * Clearing them does not affect quantity_on_hand, asset custodianship,
+ * or any other real data; it only resets the alert engine's memory of
+ * what it has already reported, so the very next scheduled or
+ * triggered check will treat every still-qualifying condition as new
+ * and raise/send a fresh alert for it, subject to the normal cooldown
+ * rules from that point onward.
+ */
+async function clearAlertHistory(req, res) {
+  try {
+    const result = await Alert.deleteMany({});
+    res.json({ message: 'Alert history cleared.', deletedCount: result.deletedCount });
+  } catch (error) {
+    res.status(500).json({ message: 'Error clearing alert history.', error: error.message });
+  }
+}
+
 module.exports = {
   listAlerts, alertSummary, triggerAlertCheck, triggerAlertCheckAuthenticated, exportAlertHistoryCsv,
+  clearAlertHistory,
 };

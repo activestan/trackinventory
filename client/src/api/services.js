@@ -87,6 +87,11 @@ export const getAlertSummary = () => axiosClient.get('/alerts/summary').then((re
 // reload the alert list afterward.
 export const checkAlertsNow = () => axiosClient.post('/alerts/check-now').then((res) => res.data);
 
+// Permanently clears all alert history (Administrator only). Does not
+// affect stock quantities or asset custodianship - only resets the
+// alert engine's record of what has already been reported.
+export const clearAlertHistory = () => axiosClient.delete('/alerts').then((res) => res.data);
+
 // Downloads the alert history as a CSV file, triggering a browser save
 // dialog by creating a temporary object URL from the response blob.
 export const exportAlertHistoryCsv = () =>
