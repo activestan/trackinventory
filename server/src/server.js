@@ -22,6 +22,19 @@ const activityLogRoutes = require('./routes/activityLogRoutes');
 
 const app = express();
 
+// Render (and most hosting platforms) sit behind a reverse proxy, so
+// every incoming request carries an X-Forwarded-For header set by that
+// proxy, not by the actual client. Without telling Express to trust
+// this proxy, express-rate-limit (used below on login/password-reset)
+// refuses to trust that header for identifying clients and throws a
+// fatal ValidationError on every rate-limited request - which was
+// crashing the entire process in production. Trusting exactly one hop
+// (the platform's own proxy) is what the express-rate-limit docs
+// recommend, since blindly trusting `true` would let a malicious client
+// spoof their own X-Forwarded-For header and bypass rate limiting
+// entirely.
+app.set('trust proxy', 1);
+
 // ---- Global middleware ----
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || '*' }));
 app.use(express.json());
